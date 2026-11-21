@@ -82,6 +82,7 @@ builder.Services.AddScoped<IScopeStore, NpgsqlScopeStore>();
 builder.Services.AddScoped<IMasterDataStore, NpgsqlMasterDataStore>();
 builder.Services.AddScoped<IStockPostingRepository, StockPostingRepository>();
 builder.Services.AddScoped<IStockAuditWriter, NpgsqlStockAuditWriter>();
+builder.Services.AddScoped<IIdempotencyStore, NpgsqlIdempotencyStore>();
 builder.Services.AddScoped<StockPostingService>();
 
 builder.Services.AddScoped<AuthenticateUserValidator>();

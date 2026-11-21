@@ -1,4 +1,4 @@
-﻿using FriendPeanut.Application.Common.Validation;
+using FriendPeanut.Application.Common.Validation;
 using FriendPeanut.Application.Features.Identity.AuthenticateUser;
 using FriendPeanut.Domain.Common;
 using System.Text.Json;
@@ -27,6 +27,8 @@ public sealed partial class ProblemDetailsMiddleware
         catch (InvalidCredentialsException ex) { await Write(ctx, 401, "INVALID_CREDENTIALS", ex.Message, null); }
         catch (AccountNotActiveException ex) { await Write(ctx, 403, "ACCOUNT_NOT_ACTIVE", ex.Message, null); }
         catch (DomainException ex) { await Write(ctx, 409, ex.Code, ex.Message, null); }
+        catch (InvalidOperationException ex) when (ex.Message == "IDEMPOTENCY_CONFLICT") { await Write(ctx, 409, "IDEMPOTENCY_CONFLICT", "مفتاح الطلب مستخدم بالفعل أو توجد عملية جارية.", null); }
+        catch (InvalidOperationException ex) when (ex.Message == "INSUFFICIENT_STOCK") { await Write(ctx, 409, "INSUFFICIENT_STOCK", "الكمية المتاحة غير كافية.", null); }
         catch (Exception ex) when (ex.Message == "CONFLICT_VERSION") { await Write(ctx, 409, "VERSION_CONFLICT", "تغيّر السجل. أعد التحميل ثم حاول مرة أخرى.", null); }
         catch (Exception ex)
         {
