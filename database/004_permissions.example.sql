@@ -1,0 +1,9 @@
+﻿-- Operator-reviewed example only. Roles must be provisioned separately; never run against a production database blindly.
+-- app_user is NOT the schema/table owner; migrator holds DDL ownership. Secrets never enter Git.
+GRANT USAGE ON SCHEMA friend_peanut TO app_user;
+GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA friend_peanut TO app_user;
+REVOKE UPDATE ON friend_peanut.stock_ledger_entries, friend_peanut.posting_batches,
+ friend_peanut.audit_events, friend_peanut.document_reversals, friend_peanut.settlement_allocations FROM app_user;
+REVOKE DELETE, TRUNCATE ON ALL TABLES IN SCHEMA friend_peanut FROM app_user;
+-- Retention workers use a separate narrowly scoped role for expired auth/idempotency data.
+-- Operational users never receive database credentials. DBA/superuser access is governed separately.

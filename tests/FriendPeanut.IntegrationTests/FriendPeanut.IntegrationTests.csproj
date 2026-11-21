@@ -1,0 +1,17 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\FriendPeanut.Domain\FriendPeanut.Domain.csproj" />
+    <ProjectReference Include="..\..\src\FriendPeanut.Application\FriendPeanut.Application.csproj" />
+    <ProjectReference Include="..\..\src\FriendPeanut.Infrastructure\FriendPeanut.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\FriendPeanut.WebApi\FriendPeanut.WebApi.csproj" />
+  </ItemGroup>
+</Project>

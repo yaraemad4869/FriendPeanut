@@ -1,0 +1,16 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/FriendPeanut.Application/FriendPeanut.Application.csproj" />
+    <Project Path="src/FriendPeanut.Domain/FriendPeanut.Domain.csproj" />
+    <Project Path="src/FriendPeanut.Infrastructure/FriendPeanut.Infrastructure.csproj" />
+    <Project Path="src/FriendPeanut.WebApi/FriendPeanut.WebApi.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/FriendPeanut.AcceptanceTests/FriendPeanut.AcceptanceTests.csproj" />
+    <Project Path="tests/FriendPeanut.ApiTests/FriendPeanut.ApiTests.csproj" />
+    <Project Path="tests/FriendPeanut.ApplicationTests/FriendPeanut.ApplicationTests.csproj" />
+    <Project Path="tests/FriendPeanut.ArchitectureTests/FriendPeanut.ArchitectureTests.csproj" />
+    <Project Path="tests/FriendPeanut.DomainTests/FriendPeanut.DomainTests.csproj" />
+    <Project Path="tests/FriendPeanut.IntegrationTests/FriendPeanut.IntegrationTests.csproj" />
+  </Folder>
+</Solution>

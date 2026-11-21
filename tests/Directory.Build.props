@@ -1,0 +1,18 @@
+﻿<Project>
+  <!--
+    Directory.Build.props is NOT chained automatically by MSBuild: the first one found
+    while walking up the tree wins. This file explicitly imports the parent (backend\)
+    props first, then adds test-only suppressions on top.
+  -->
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)..'))" />
+
+  <PropertyGroup>
+    <!--
+      CA1707: test methods use the Method_Scenario_ExpectedResult convention,
+      which is deliberate and recommended by xUnit. The rule is correct for public
+      API surface and wrong for test method names, so it is suppressed only in
+      the tests folder. Production code (src\) remains fully checked.
+    -->
+    <NoWarn>$(NoWarn);CA1707</NoWarn>
+  </PropertyGroup>
+</Project>

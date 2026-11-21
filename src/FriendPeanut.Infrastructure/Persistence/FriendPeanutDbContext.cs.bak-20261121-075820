@@ -1,0 +1,16 @@
+﻿using Microsoft.EntityFrameworkCore;
+
+namespace FriendPeanut.Infrastructure.Persistence;
+
+public sealed class FriendPeanutDbContext : DbContext
+{
+    public DbSet<DocumentRecord> Documents => Set<DocumentRecord>();
+
+{
+    public FriendPeanutDbContext(DbContextOptions<FriendPeanutDbContext> options) : base(options) { }
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.HasDefaultSchema("friend_peanut");
+        base.OnModelCreating(modelBuilder);
+    }
+}

@@ -1,0 +1,157 @@
+-- Invariants complementary to .NET Domain rules. Run after 001_schema.sql.
+BEGIN;
+SET search_path TO friend_peanut, public;
+CREATE FUNCTION deny_mutation() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN RAISE EXCEPTION 'IMMUTABLE_RECORD: %', TG_TABLE_NAME; END $$;
+CREATE FUNCTION protect_account_slots() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN RAISE EXCEPTION 'FIXED_ACCOUNT_SLOTS: deactivate an account instead'; END $$;
+CREATE TRIGGER fixed_account_slots BEFORE DELETE ON app_users FOR EACH ROW EXECUTE FUNCTION protect_account_slots();
+CREATE FUNCTION limit_remote_users() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+ PERFORM pg_advisory_xact_lock(6601001);
+ IF NEW.remote_access_enabled AND
+   (SELECT count(*) FROM app_users WHERE remote_access_enabled AND id<>NEW.id)>=3 THEN
+  RAISE EXCEPTION 'REMOTE_USER_LIMIT';
+ END IF;
+ RETURN NEW;
+END $$;
+CREATE TRIGGER remote_user_limit BEFORE INSERT OR UPDATE OF remote_access_enabled ON app_users
+ FOR EACH ROW EXECUTE FUNCTION limit_remote_users();
+CREATE FUNCTION protect_document() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+ IF TG_OP='DELETE' THEN RAISE EXCEPTION 'DOCUMENT_DELETE_FORBIDDEN'; END IF;
+ IF OLD.status='POSTED' THEN RAISE EXCEPTION 'DOCUMENT_POSTED'; END IF;
+ IF NEW.version<>OLD.version+1 THEN RAISE EXCEPTION 'CONCURRENT_UPDATE'; END IF;
+ IF NEW.status<>OLD.status AND NOT (
+  (OLD.status='DRAFT' AND NEW.status IN ('SUBMITTED','CANCELLED')) OR
+  (OLD.status='SUBMITTED' AND NEW.status IN ('APPROVED','REJECTED','CANCELLED')) OR
+  (OLD.status='APPROVED' AND NEW.status IN ('POSTED','CANCELLED'))
+ ) THEN RAISE EXCEPTION 'INVALID_TRANSITION'; END IF;
+ IF NEW.status IN ('REJECTED','CANCELLED') AND length(trim(coalesce(NEW.reason,'')))=0 THEN
+  RAISE EXCEPTION 'REASON_REQUIRED';
+ END IF;
+ IF NEW.status IN ('APPROVED','POSTED') AND (NEW.approved_at IS NULL OR NEW.approved_by IS NULL) THEN
+  RAISE EXCEPTION 'APPROVAL_REQUIRED';
+ END IF;
+ RETURN NEW;
+END $$;
+CREATE TRIGGER document_guard BEFORE UPDATE OR DELETE ON documents FOR EACH ROW EXECUTE FUNCTION protect_document();
+CREATE FUNCTION protect_posted_child() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE owner_id uuid; frozen boolean;
+BEGIN
+ IF TG_OP='INSERT' THEN owner_id := (to_jsonb(NEW)->>TG_ARGV[0])::uuid;
+ ELSE owner_id := (to_jsonb(OLD)->>TG_ARGV[0])::uuid; END IF;
+ IF TG_ARGV[1]='DIRECT' THEN
+  SELECT status='POSTED' INTO frozen FROM documents WHERE id=owner_id;
+ ELSE
+  SELECT s.status='POSTED' OR d.status='POSTED' INTO frozen
+  FROM production_stages s JOIN documents d ON d.id=s.order_id WHERE s.id=owner_id;
+ END IF;
+ IF frozen THEN RAISE EXCEPTION 'DOCUMENT_POSTED'; END IF;
+ IF TG_TABLE_NAME='production_stages' AND TG_OP<>'INSERT' AND to_jsonb(OLD)->>'status'='POSTED' THEN
+  RAISE EXCEPTION 'STAGE_POSTED';
+ END IF;
+ IF TG_OP='UPDATE' AND (to_jsonb(NEW)->>TG_ARGV[0]) IS DISTINCT FROM (to_jsonb(OLD)->>TG_ARGV[0]) THEN
+  RAISE EXCEPTION 'PARENT_CHANGE_FORBIDDEN';
+ END IF;
+ IF TG_OP='DELETE' THEN RETURN OLD; END IF;
+ RETURN NEW;
+END $$;
+CREATE FUNCTION validate_typed_header() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE actual_type text;
+BEGIN
+ SELECT document_type INTO actual_type FROM documents WHERE id=NEW.id;
+ IF actual_type IS DISTINCT FROM TG_ARGV[0] THEN RAISE EXCEPTION 'DOCUMENT_TYPE_MISMATCH'; END IF;
+ RETURN NEW;
+END $$;
+CREATE FUNCTION assert_posted_integrity() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE line_count integer; balance numeric;
+BEGIN
+ IF NEW.status<>'POSTED' THEN RETURN NULL; END IF;
+ IF NEW.document_type='JOURNAL' THEN
+  SELECT count(*),coalesce(sum(debit-credit),0) INTO line_count,balance
+  FROM journal_lines WHERE journal_entry_id=NEW.id;
+  IF line_count<2 OR balance<>0 THEN RAISE EXCEPTION 'UNBALANCED_ENTRY'; END IF;
+ END IF;
+ IF NEW.document_type='STOCK' THEN
+  IF NOT EXISTS(SELECT 1 FROM posting_batches WHERE document_id=NEW.id) THEN RAISE EXCEPTION 'POSTING_BATCH_REQUIRED'; END IF;
+  IF NOT EXISTS(SELECT 1 FROM stock_document_lines WHERE stock_document_id=NEW.id) THEN RAISE EXCEPTION 'DOCUMENT_LINES_REQUIRED'; END IF;
+  IF EXISTS(
+   SELECT 1 FROM stock_document_lines l JOIN items i ON i.id=l.item_id
+   WHERE l.stock_document_id=NEW.id AND (i.unit_status<>'APPROVED' OR i.base_unit_id<>l.base_unit_id)
+  ) THEN RAISE EXCEPTION 'UNIT_PENDING_OR_MISMATCH'; END IF;
+  IF EXISTS(
+   SELECT 1 FROM stock_document_lines l JOIN stock_documents s ON s.id=l.stock_document_id
+   LEFT JOIN posting_batches b ON b.document_id=s.id
+   LEFT JOIN stock_ledger_entries e ON e.posting_batch_id=b.id AND e.stock_line_id=l.id
+   WHERE s.id=NEW.id GROUP BY l.id,l.quantity_base,l.direction,s.movement_type,s.warehouse_id,s.counter_warehouse_id
+   HAVING (s.movement_type='TRANSFER' AND (count(e.id)<>2 OR sum(e.quantity_delta)<>0
+     OR count(e.id) FILTER(WHERE e.warehouse_id=s.warehouse_id AND e.quantity_delta=-l.quantity_base)<>1
+     OR count(e.id) FILTER(WHERE e.warehouse_id=s.counter_warehouse_id AND e.quantity_delta=l.quantity_base)<>1))
+    OR (s.movement_type<>'TRANSFER' AND (count(e.id)<>1
+     OR count(e.id) FILTER(WHERE e.warehouse_id=s.warehouse_id AND e.quantity_delta=l.quantity_base*l.direction)<>1))
+  ) THEN RAISE EXCEPTION 'LEDGER_DOCUMENT_MISMATCH'; END IF;
+  IF EXISTS(
+   SELECT 1 FROM stock_ledger_entries e JOIN posting_batches b ON b.id=e.posting_batch_id
+   JOIN stock_document_lines l ON l.id=e.stock_line_id
+   WHERE b.document_id=NEW.id AND (l.stock_document_id<>b.document_id OR e.item_id<>l.item_id OR e.lot_id<>l.lot_id OR e.base_unit_id<>l.base_unit_id)
+  ) THEN RAISE EXCEPTION 'LEDGER_LINE_MISMATCH'; END IF;
+ END IF;
+ RETURN NULL;
+END $$;
+CREATE CONSTRAINT TRIGGER posted_integrity AFTER INSERT OR UPDATE ON documents
+ DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION assert_posted_integrity();
+CREATE FUNCTION validate_reversal_link() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE original_status text; reversal_status text;
+BEGIN
+ SELECT status INTO original_status FROM documents WHERE id=NEW.original_document_id;
+ SELECT status INTO reversal_status FROM documents WHERE id=NEW.reversal_document_id;
+ IF original_status<>'POSTED' OR reversal_status<>'POSTED' THEN RAISE EXCEPTION 'REVERSAL_MUST_BE_POSTED'; END IF;
+ RETURN NEW;
+END $$;
+CREATE TRIGGER reversal_link_guard BEFORE INSERT ON document_reversals FOR EACH ROW EXECUTE FUNCTION validate_reversal_link();
+
+CREATE TRIGGER document_reversals_append_only BEFORE UPDATE OR DELETE ON document_reversals FOR EACH ROW EXECUTE FUNCTION deny_mutation();
+
+CREATE TRIGGER audit_events_append_only BEFORE UPDATE OR DELETE ON audit_events FOR EACH ROW EXECUTE FUNCTION deny_mutation();
+
+CREATE TRIGGER posting_batches_append_only BEFORE UPDATE OR DELETE ON posting_batches FOR EACH ROW EXECUTE FUNCTION deny_mutation();
+
+CREATE TRIGGER stock_ledger_entries_append_only BEFORE UPDATE OR DELETE ON stock_ledger_entries FOR EACH ROW EXECUTE FUNCTION deny_mutation();
+
+CREATE TRIGGER settlement_allocations_append_only BEFORE UPDATE OR DELETE ON settlement_allocations FOR EACH ROW EXECUTE FUNCTION deny_mutation();
+
+CREATE TRIGGER stock_documents_type_guard BEFORE INSERT OR UPDATE ON stock_documents FOR EACH ROW EXECUTE FUNCTION validate_typed_header('STOCK');
+CREATE TRIGGER stock_documents_posted_guard BEFORE INSERT OR UPDATE OR DELETE ON stock_documents FOR EACH ROW EXECUTE FUNCTION protect_posted_child('id','DIRECT');
+
+CREATE TRIGGER production_orders_type_guard BEFORE INSERT OR UPDATE ON production_orders FOR EACH ROW EXECUTE FUNCTION validate_typed_header('PRODUCTION');
+CREATE TRIGGER production_orders_posted_guard BEFORE INSERT OR UPDATE OR DELETE ON production_orders FOR EACH ROW EXECUTE FUNCTION protect_posted_child('id','DIRECT');
+
+CREATE TRIGGER journal_entries_type_guard BEFORE INSERT OR UPDATE ON journal_entries FOR EACH ROW EXECUTE FUNCTION validate_typed_header('JOURNAL');
+CREATE TRIGGER journal_entries_posted_guard BEFORE INSERT OR UPDATE OR DELETE ON journal_entries FOR EACH ROW EXECUTE FUNCTION protect_posted_child('id','DIRECT');
+
+CREATE TRIGGER financial_documents_type_guard BEFORE INSERT OR UPDATE ON financial_documents FOR EACH ROW EXECUTE FUNCTION validate_typed_header('FINANCIAL');
+CREATE TRIGGER financial_documents_posted_guard BEFORE INSERT OR UPDATE OR DELETE ON financial_documents FOR EACH ROW EXECUTE FUNCTION protect_posted_child('id','DIRECT');
+
+CREATE TRIGGER expenses_type_guard BEFORE INSERT OR UPDATE ON expenses FOR EACH ROW EXECUTE FUNCTION validate_typed_header('EXPENSE');
+CREATE TRIGGER expenses_posted_guard BEFORE INSERT OR UPDATE OR DELETE ON expenses FOR EACH ROW EXECUTE FUNCTION protect_posted_child('id','DIRECT');
+
+CREATE TRIGGER purchase_documents_type_guard BEFORE INSERT OR UPDATE ON purchase_documents FOR EACH ROW EXECUTE FUNCTION validate_typed_header('PURCHASE');
+CREATE TRIGGER purchase_documents_posted_guard BEFORE INSERT OR UPDATE OR DELETE ON purchase_documents FOR EACH ROW EXECUTE FUNCTION protect_posted_child('id','DIRECT');
+
+CREATE TRIGGER sales_documents_type_guard BEFORE INSERT OR UPDATE ON sales_documents FOR EACH ROW EXECUTE FUNCTION validate_typed_header('SALE');
+CREATE TRIGGER sales_documents_posted_guard BEFORE INSERT OR UPDATE OR DELETE ON sales_documents FOR EACH ROW EXECUTE FUNCTION protect_posted_child('id','DIRECT');
+
+CREATE TRIGGER harvest_receipts_type_guard BEFORE INSERT OR UPDATE ON harvest_receipts FOR EACH ROW EXECUTE FUNCTION validate_typed_header('HARVEST');
+CREATE TRIGGER harvest_receipts_posted_guard BEFORE INSERT OR UPDATE OR DELETE ON harvest_receipts FOR EACH ROW EXECUTE FUNCTION protect_posted_child('id','DIRECT');
+CREATE TRIGGER stock_document_lines_posted_guard BEFORE INSERT OR UPDATE OR DELETE ON stock_document_lines FOR EACH ROW EXECUTE FUNCTION protect_posted_child('stock_document_id','DIRECT');
+CREATE TRIGGER journal_lines_posted_guard BEFORE INSERT OR UPDATE OR DELETE ON journal_lines FOR EACH ROW EXECUTE FUNCTION protect_posted_child('journal_entry_id','DIRECT');
+CREATE TRIGGER purchase_lines_posted_guard BEFORE INSERT OR UPDATE OR DELETE ON purchase_lines FOR EACH ROW EXECUTE FUNCTION protect_posted_child('purchase_document_id','DIRECT');
+CREATE TRIGGER sales_lines_posted_guard BEFORE INSERT OR UPDATE OR DELETE ON sales_lines FOR EACH ROW EXECUTE FUNCTION protect_posted_child('sales_document_id','DIRECT');
+CREATE TRIGGER production_stages_posted_guard BEFORE INSERT OR UPDATE OR DELETE ON production_stages FOR EACH ROW EXECUTE FUNCTION protect_posted_child('order_id','DIRECT');
+CREATE TRIGGER production_inputs_posted_guard BEFORE INSERT OR UPDATE OR DELETE ON production_inputs FOR EACH ROW EXECUTE FUNCTION protect_posted_child('stage_id','STAGE');
+CREATE TRIGGER production_outputs_posted_guard BEFORE INSERT OR UPDATE OR DELETE ON production_outputs FOR EACH ROW EXECUTE FUNCTION protect_posted_child('stage_id','STAGE');
+CREATE TRIGGER production_losses_posted_guard BEFORE INSERT OR UPDATE OR DELETE ON production_losses FOR EACH ROW EXECUTE FUNCTION protect_posted_child('stage_id','STAGE');
+CREATE TRIGGER production_costs_posted_guard BEFORE INSERT OR UPDATE OR DELETE ON production_costs FOR EACH ROW EXECUTE FUNCTION protect_posted_child('order_id','DIRECT');
+
+COMMIT;

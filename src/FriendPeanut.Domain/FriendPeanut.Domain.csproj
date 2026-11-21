@@ -1,0 +1,3 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Domain is BCL-only per 00_TEAM_INSTRUCTIONS_EN.md -->
+</Project>
