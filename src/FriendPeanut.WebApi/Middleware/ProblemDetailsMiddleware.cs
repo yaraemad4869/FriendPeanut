@@ -26,6 +26,8 @@ public sealed partial class ProblemDetailsMiddleware
         catch (ValidationException ex) { await Write(ctx, 422, "VALIDATION_FAILED", "بيانات غير صالحة.", ex.Errors); }
         catch (InvalidCredentialsException ex) { await Write(ctx, 401, "INVALID_CREDENTIALS", ex.Message, null); }
         catch (AccountNotActiveException ex) { await Write(ctx, 403, "ACCOUNT_NOT_ACTIVE", ex.Message, null); }
+        catch (UnauthorizedAccessException ex) when (ex.Message == "Authentication is required.") { await Write(ctx, 401, "AUTHENTICATION_REQUIRED", "يجب تسجيل الدخول أولاً.", null); }
+        catch (UnauthorizedAccessException) { await Write(ctx, 403, "FORBIDDEN", "ليست لديك الصلاحية لتنفيذ هذه العملية.", null); }
         catch (DomainException ex) { await Write(ctx, 409, ex.Code, ex.Message, null); }
         catch (InvalidOperationException ex) when (ex.Message == "IDEMPOTENCY_CONFLICT") { await Write(ctx, 409, "IDEMPOTENCY_CONFLICT", "مفتاح الطلب مستخدم بالفعل أو توجد عملية جارية.", null); }
         catch (InvalidOperationException ex) when (ex.Message == "INSUFFICIENT_STOCK") { await Write(ctx, 409, "INSUFFICIENT_STOCK", "الكمية المتاحة غير كافية.", null); }

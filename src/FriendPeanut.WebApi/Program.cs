@@ -116,6 +116,19 @@ builder.Services
         opts.Cookie.SameSite = SameSiteMode.Strict;
         opts.SlidingExpiration = false;
         opts.ExpireTimeSpan = TimeSpan.FromHours(8);
+
+        opts.Events.OnRedirectToLogin = ctx =>
+        {
+            ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            return Task.CompletedTask;
+        };
+
+        opts.Events.OnRedirectToAccessDenied = ctx =>
+        {
+            ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+            return Task.CompletedTask;
+        };
+
         opts.Events.OnValidatePrincipal = async ctx =>
         {
             var token = ctx.Request.Cookies["fp_session"];
@@ -163,10 +176,7 @@ app.MapMasterDataEndpoints();
 app.MapStockPostingEndpoint();
 app.MapIdentityAdminEndpoints();
 
-if (app.Environment.IsDevelopment())
-{
     app.MapOpenApi();
-}
 
 app.Run();
 

@@ -1,4 +1,4 @@
-﻿using FluentValidation;
+using FluentValidation;
 
 namespace FriendPeanut.Application.Features.Inventory.PostStockDocument;
 
@@ -15,7 +15,7 @@ public sealed class PostStockDocumentValidator
 
         RuleFor(x => x.IdempotencyKey)
             .NotEmpty()
-            .MaximumLength(200);
+            .MaximumLength(100);
 
         RuleFor(x => x.NegativeStockOverrideReason)
             .NotEmpty()

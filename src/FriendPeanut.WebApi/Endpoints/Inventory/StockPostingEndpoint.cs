@@ -1,4 +1,4 @@
-﻿using FriendPeanut.Application.Features.Inventory.PostStockDocument;
+using FriendPeanut.Application.Features.Inventory.PostStockDocument;
 using Microsoft.AspNetCore.Mvc;
 
 namespace FriendPeanut.WebApi.Endpoints.Inventory;
@@ -8,7 +8,7 @@ public static class StockPostingEndpoint
     public static IEndpointRouteBuilder MapStockPostingEndpoint(
         this IEndpointRouteBuilder endpoints)
     {
-        endpoints.MapPost(
+        var postEndpoint = endpoints.MapPost(
             "/api/v1/stock-documents/{id:guid}/post",
             async (
                 [FromRoute] Guid id,
@@ -31,6 +31,8 @@ public static class StockPostingEndpoint
 
                 return Results.Ok(result);
             });
+
+        postEndpoint.RequireAuthorization();
 
         return endpoints;
     }

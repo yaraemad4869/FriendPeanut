@@ -134,10 +134,19 @@ public sealed class StockPostingService
                 command.DocumentId,
                 cancellationToken))
             {
+                var persistedVersion =
+                    await _repository.GetPostedDocumentVersionAsync(
+                        command.DocumentId,
+                        cancellationToken);
+
+                if (persistedVersion is null)
+                    throw new InvalidOperationException(
+                        "Posted document version could not be read.");
+
                 var alreadyPosted = new PostStockDocumentResult(
                     command.DocumentId,
                     "POSTED",
-                    command.ExpectedVersion + 1,
+                    persistedVersion.Value,
                     true);
 
                 await _idempotency.SaveCompletedAsync(

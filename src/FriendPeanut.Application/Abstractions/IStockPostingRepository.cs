@@ -8,6 +8,11 @@ public interface IStockPostingRepository
 
     Task<bool> IsDocumentPostedAsync(Guid documentId, CancellationToken cancellationToken);
 
+    Task<long?> GetPostedDocumentVersionAsync(
+        Guid documentId,
+        CancellationToken cancellationToken)
+        => Task.FromResult<long?>(null);
+
     Task<IReadOnlyList<StockMovement>> GetMovementsAsync(
         Guid documentId,
         CancellationToken cancellationToken);

@@ -62,6 +62,24 @@ public sealed class StockPostingRepository : IStockPostingRepository
         return (bool)(await command.ExecuteScalarAsync(cancellationToken) ?? false);
     }
 
+    public async Task<long?> GetPostedDocumentVersionAsync(
+        Guid documentId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = Command("""
+            SELECT version
+            FROM friend_peanut.documents
+            WHERE id=@id AND status='POSTED'
+            """);
+
+        command.Parameters.AddWithValue("id", documentId);
+
+        var result = await command.ExecuteScalarAsync(cancellationToken);
+
+        return result is null or DBNull
+            ? null
+            : Convert.ToInt64(result, System.Globalization.CultureInfo.InvariantCulture);
+    }
     public async Task<IReadOnlyList<StockMovement>> GetMovementsAsync(
         Guid documentId,
         CancellationToken cancellationToken)
