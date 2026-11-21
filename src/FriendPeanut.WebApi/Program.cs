@@ -163,10 +163,7 @@ app.MapMasterDataEndpoints();
 app.MapStockPostingEndpoint();
 app.MapIdentityAdminEndpoints();
 
-if (app.Environment.IsDevelopment())
-{
-    app.MapOpenApi();
-}
+app.MapOpenApi();
 
 app.Run();
 
